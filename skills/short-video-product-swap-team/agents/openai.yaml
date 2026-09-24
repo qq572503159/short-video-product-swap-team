@@ -1,0 +1,8 @@
+interface:
+  display_name: "短视频复刻中文团队"
+  short_description: "保留人物和场景，只替换产品的多智能体视频流程"
+  brand_color: "#C23B32"
+  default_prompt: "使用 $short-video-product-swap-team 拆解这条参考视频，只替换产品，并同时准备直接生成与手动素材包。"
+
+policy:
+  allow_implicit_invocation: true

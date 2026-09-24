@@ -1,0 +1,153 @@
+{
+  "schema_version": "1.0",
+  "team_id": "short_video_replication",
+  "display_name": "短视频复刻协作团队",
+  "locale": "zh-CN",
+  "principles": [
+    "原始视频默认只在本地分析，不上传生成供应商",
+    "所有角色通过项目 artifacts 交接，不直接覆盖其他角色的产物",
+    "真实生成任务必须经过费用审批",
+    "角色使用稳定英文 id，界面和报告使用中文 display_name"
+  ],
+  "artifacts": {
+    "project_root": "projects/<project>",
+    "analysis_dir": "projects/<project>/analysis",
+    "output_dir": "projects/<project>/outputs",
+    "reference_collages_dir": "projects/<project>/outputs/reference_collages",
+    "sensitive_inputs": [
+      "projects/<project>/inputs/reference.mp4",
+      "projects/<project>/inputs/product_refs/"
+    ]
+  },
+  "workflow": {
+    "entry": "workflow_orchestrator",
+    "approval_gates": ["reference_scope", "generation_billing", "delivery_release"],
+    "edges": [
+      ["workflow_orchestrator", "video_analyzer"],
+      ["video_analyzer", "shot_planner"],
+      ["video_analyzer", "keyframe_curator"],
+      ["video_analyzer", "deep_video_analyzer"],
+      ["deep_video_analyzer", "script_director"],
+      ["shot_planner", "prompt_director"],
+      ["keyframe_curator", "prompt_director"],
+      ["prompt_director", "quality_reviewer"],
+      ["quality_reviewer", "provider_adapter"],
+      ["provider_adapter", "delivery_packager"]
+    ],
+    "parallel_groups": [
+      ["shot_planner", "keyframe_curator"]
+    ]
+  },
+  "agents": [
+    {
+      "id": "workflow_orchestrator",
+      "display_name": "总导演",
+      "implementation": "video_replicator.orchestrator.Orchestrator",
+      "responsibility": "创建项目、调度各角色、检查依赖、记录状态，不代替专业角色做视觉判断。",
+      "inputs": ["reference video path", "product reference paths", "project options"],
+      "outputs": ["project directory", "workflow status", "handoff manifest"],
+      "acceptance": ["所有必需阶段都有明确状态", "失败阶段保留可重试的输入和错误信息"],
+      "approval_gate": "none",
+      "handoff": {"to": ["video_analyzer"], "requires": ["project initialized", "input paths recorded"]}
+    },
+    {
+      "id": "video_analyzer",
+      "display_name": "视频拆解师",
+      "implementation": "video_replicator.agents.AnalyzerAgent",
+      "responsibility": "提取可观察的镜头、时长、音频、画面尺寸和镜头边界；不臆测品牌或不可见信息。",
+      "inputs": ["inputs/reference.mp4"],
+      "outputs": ["analysis/evidence.json", "analysis/shots.json", "analysis/track.json", "analysis/frames/", "analysis/shots-report.html"],
+      "acceptance": ["evidence.source 指向本地输入", "metadata.duration 可读取或明确记录缺失", "所有警告写入 evidence.warnings"],
+      "approval_gate": "reference_scope",
+      "handoff": {"to": ["shot_planner", "keyframe_curator"], "requires": ["evidence.json", "local frame directory"]}
+    },
+    {
+      "id": "shot_planner",
+      "display_name": "复刻策划师",
+      "implementation": "video_replicator.agents.StoryPlannerAgent",
+      "responsibility": "把分析证据转成连续镜头、时间段和画幅约束，保留原视频动作起止状态。",
+      "inputs": ["analysis/evidence.json", "segment_max_sec", "aspect_ratio"],
+      "outputs": ["analysis/plan.json"],
+      "acceptance": ["每个镜头 start 小于 end", "每个 segment 不超过时长上限", "风险和待人工确认项显式记录"],
+      "approval_gate": "reference_scope",
+      "handoff": {"to": ["prompt_director"], "requires": ["analysis/plan.json", "approved scope"]}
+    },
+    {
+      "id": "deep_video_analyzer",
+      "display_name": "深度拆解师",
+      "implementation": "video_replicator.deep_analysis.run_deep_analysis",
+      "responsibility": "按镜头、动作、对白、产品状态和连续性边界生成可编辑的逐时间片拆解；原视频字幕不作为复刻目标，生成阶段根据新文案重新设计字幕。没有 ASR/视觉证据时明确标待分析，不猜测内容。",
+      "inputs": ["analysis/evidence.json", "outputs/reference_collages/manifest.json", "optional ASR JSON"],
+      "outputs": ["analysis/deep-analysis.json", "analysis/deep-analysis.md"],
+      "acceptance": ["时间段按镜头/对白边界切分，无边界时按间隔兜底", "原声对白标记来源", "产品状态和连续性字段完整", "原字幕不进入复刻提示词", "不把画面猜测写成对白"],
+      "approval_gate": "reference_scope",
+      "handoff": {"to": ["script_director", "prompt_director"], "requires": ["deep-analysis.json", "deep-analysis.md"]}
+    },
+    {
+      "id": "script_director",
+      "display_name": "文案导演",
+      "implementation": "project editable script timeline",
+      "responsibility": "根据深度拆解编辑原文案、新文案、配音策略和字幕策略，检查文字时长是否适配画面动作。",
+      "inputs": ["analysis/deep-analysis.json", "adapted_script.md", "optional new copy"],
+      "outputs": ["analysis/script-timeline.json", "adapted_script.md"],
+      "acceptance": ["新文案与时间段一一对应", "原文案、改写文案和来源分开记录", "需要新配音或嘴型同步时显式标记"],
+      "approval_gate": "reference_scope",
+      "handoff": {"to": ["prompt_director", "provider_adapter"], "requires": ["approved script strategy"]}
+    },
+    {
+      "id": "keyframe_curator",
+      "display_name": "关键帧拼图师",
+      "implementation": "video_replicator.agents.KeyframeCurationAgent",
+      "responsibility": "按时间顺序整理关键帧；默认每秒一帧，每三帧或六帧拼成一张参考图，并使用全局连续 Shot 编号。",
+      "inputs": ["analysis/evidence.json", "analysis/frames/", "inputs/reference.mp4 (local fallback)"],
+      "outputs": ["outputs/reference_collages/shot-sheet-*.jpg", "outputs/reference_collages/manifest.json"],
+      "acceptance": ["每张拼图最多三张连续帧", "编号全局连续且不按拼图重置", "manifest 记录时间戳、来源和警告", "不上传原始视频"],
+      "approval_gate": "reference_scope",
+      "handoff": {"to": ["prompt_director"], "requires": ["至少一张有效 shot-sheet", "manifest.json"]}
+    },
+    {
+      "id": "prompt_director",
+      "display_name": "提示词导演",
+      "implementation": "video_replicator.agents.PromptDirectorAgent",
+      "responsibility": "将镜头计划、关键帧和产品替换约束合成为可执行的分段提示词；明确保留人物、动作、场景和光线。",
+      "inputs": ["analysis/plan.json", "reference_collages/manifest.json", "product reference paths", "product swap brief"],
+      "outputs": ["outputs/prompts.json", "outputs/final_product_swap_prompt.md"],
+      "acceptance": ["提示词自洽且包含画幅、时长和连续性要求", "明确只替换产品、不改变人物", "不包含本地路径作为供应商 URL"],
+      "approval_gate": "reference_scope",
+      "handoff": {"to": ["quality_reviewer"], "requires": ["prompt artifacts", "reference asset manifest"]}
+    },
+    {
+      "id": "quality_reviewer",
+      "display_name": "质量验收官",
+      "implementation": "video_replicator.agents.QAAgent",
+      "responsibility": "执行确定性检查，汇总风险，并阻止缺少审批、素材或连续性信息的生成任务。",
+      "inputs": ["analysis/plan.json", "outputs/prompts.json", "reference_collages/manifest.json"],
+      "outputs": ["outputs/qa.json", "review decision"],
+      "acceptance": ["qa.status 为 approved 或 review_required", "所有 flags 可定位到具体产物", "review_required 时不得提交付费生成"],
+      "approval_gate": "generation_billing",
+      "handoff": {"to": ["provider_adapter"], "requires": ["qa.status=approved", "费用确认记录"]}
+    },
+    {
+      "id": "provider_adapter",
+      "display_name": "生成执行师",
+      "implementation": "packages/provider-newapi-video/src/provider.ts",
+      "responsibility": "把已批准的提示词和公网素材 URL 映射到目标视频 API；默认 dry-run，负责轮询和结果下载。",
+      "inputs": ["approved prompt", "public reference image URLs", "provider runtime configuration"],
+      "outputs": ["outputs/newapi/request.redacted.json", "outputs/newapi/status.json", "outputs/newapi/generated.mp4"],
+      "acceptance": ["不记录 token", "未收到费用确认时只执行 check/plan/pricing 或 dry-run", "生成失败保留可诊断响应"],
+      "approval_gate": "generation_billing",
+      "handoff": {"to": ["delivery_packager"], "requires": ["generated.mp4 or explicit provider failure", "redacted request"]}
+    },
+    {
+      "id": "delivery_packager",
+      "display_name": "交付打包师",
+      "implementation": "scripts/export-manual-generation-package.ps1",
+      "responsibility": "同时准备直接生成结果和可供同事在其他平台使用的素材包、提示词、参数及中文教程。",
+      "inputs": ["reference collages", "product references", "prompt artifacts", "audio track", "generated video (optional)"],
+      "outputs": ["outputs/manual-generation-package.zip", "outputs/manual-generation-package/README-中文教程.md", "final delivery report"],
+      "acceptance": ["包内不含 API token", "教程说明图片数量、尺寸、音频合成和费用注意事项", "交付方式明确标注直接生成与自行生成"],
+      "approval_gate": "delivery_release",
+      "handoff": {"to": [], "requires": ["release approval", "artifact inventory"]}
+    }
+  ]
+}

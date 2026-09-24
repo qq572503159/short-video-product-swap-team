@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "video-replicator"
+version = "0.1.0"
+description = "Local multi-agent workflow for short-video breakdown and replication planning"
+requires-python = ">=3.10"
+dependencies = ["Pillow>=10"]
+
+[project.scripts]
+video-replicator = "video_replicator.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["video_replicator*"]

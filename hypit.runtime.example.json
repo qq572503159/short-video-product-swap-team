@@ -1,0 +1,31 @@
+{
+  "format": "hypit.runtime-local@1",
+  "dataRoot": ".hypit/runtimes/local",
+  "credentials": {
+    "env": { "use": "@hypit/credential-store-env" }
+  },
+  "endpoints": {
+    "newapi.default": {
+      "use": "@local/provider-newapi-video",
+      "pool": "newapi.default",
+      "config": {
+        "baseUrl": "https://newapi.megabyai.cc",
+        "apiKey": { "store": "env", "key": "NEW_API_TOKEN" },
+        "defaultConcurrency": 1,
+        "pollIntervalMs": 3000,
+        "assetUrls": {}
+      }
+    },
+    "media.local": {
+      "use": "@hypit/provider-media-local",
+      "config": { "defaultConcurrency": 2 }
+    },
+    "hyperframes.local": {
+      "use": "@hypit/provider-hyperframes-local",
+      "config": { "workers": "auto", "defaultConcurrency": 1 }
+    }
+  },
+  "bindings": {
+    "@hypit/seedance@1#seedance-2-mini": "newapi.default"
+  }
+}

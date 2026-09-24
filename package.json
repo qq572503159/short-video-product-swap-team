@@ -1,0 +1,7 @@
+{
+  "name": "short-video-replication-workspace",
+  "private": true,
+  "dependencies": {
+    "@local/provider-newapi-video": "file:packages/provider-newapi-video"
+  }
+}

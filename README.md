@@ -50,6 +50,15 @@ flowchart TD
 ```powershell
 git clone <本仓库地址>
 cd short-video-product-swap-team
+py -3.12 -m pip install -e .
+npm install
+npm --prefix .\packages\provider-newapi-video install
+npm --prefix .\packages\provider-newapi-video run build
+```
+
+项目要求 Python `>=3.10`。Windows 上若 `python` 指向旧版本，统一使用 `py -3.12`；也可以运行初始化脚本完成同样的检查和安装：
+
+```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\init-workspace.ps1 -InstallNodeDependencies -InstallPython
 ```
 
@@ -79,22 +88,22 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run-video-team.ps1 -Project p
 该入口默认执行本地分析、关键帧、提示词、QA 和素材包准备。命令参数以 `-Help`/脚本说明为准。CLI 也可分步使用：
 
 ```powershell
-python -m video_replicator.cli analyze .\projects\my-campaign\inputs\reference.mp4 --project .\projects\my-campaign
-python -m video_replicator.cli keyframes --project .\projects\my-campaign --frames-per-sheet 6
-python -m video_replicator.cli plan .\projects\my-campaign\analysis\evidence.json --project .\projects\my-campaign --segment-max 15
-python -m video_replicator.cli prompts .\projects\my-campaign\analysis\plan.json --project .\projects\my-campaign
+py -3.12 -m video_replicator.cli analyze .\projects\my-campaign\inputs\reference.mp4 --project .\projects\my-campaign
+py -3.12 -m video_replicator.cli keyframes --project .\projects\my-campaign --frames-per-sheet 6
+py -3.12 -m video_replicator.cli plan .\projects\my-campaign\analysis\evidence.json --project .\projects\my-campaign --segment-max 15
+py -3.12 -m video_replicator.cli prompts .\projects\my-campaign\analysis\plan.json --project .\projects\my-campaign
 ```
 
 运行前查看 CLI 参数：
 
 ```powershell
-python -m video_replicator.cli --help
+py -3.12 -m video_replicator.cli --help
 ```
 
 需要把模型生成的静音视频与改写文案时间轴合成为本地配音时，可使用参数化脚本：
 
 ```powershell
-python .\scripts\build_exact_voiceover.py `
+py -3.12 .\scripts\build_exact_voiceover.py `
   --project .\projects\my-campaign `
   --video .\projects\my-campaign\outputs\newapi\generated.mp4 `
   --timeline .\projects\my-campaign\analysis\script-timeline.json
@@ -120,7 +129,26 @@ Gemini（可选）使用 `GEMINI_API_KEY` 环境变量。不要将密钥放进�
 
 ### Dry-run 与真实生成
 
-默认先 dry-run，检查提示词、参考素材和脱敏请求；Hypit `check`、`plan`、`pricing` 是只读准备步骤。只有在确认替换范围、模型、生成声音/字幕策略、时长、分辨率和费用后，才使用 CLI 的真实提交选项。Python New API 真实提交还要求 `outputs/qa.json` 的状态为 `approved`，并要求已有最终逐镜提示词。Hypit provider 当前只支持静音链路；需要模型原生音频时不要走 Hypit Build。真实生成可能产生费用，具体命令及 provider 能力以 `python -m video_replicator.cli newapi --help` 和 `docs/OPERATIONS.md` 为准。
+默认先 dry-run，检查提示词、参考素材和脱敏请求；Hypit `check`、`plan`、`pricing` 是只读准备步骤。只有在确认替换范围、模型、生成声音/字幕策略、时长、分辨率和费用后，才使用 CLI 的真实提交选项。Python New API 真实提交要求 `outputs/qa.json` 的状态为 `ready`、存在最终逐镜提示词，并且 `outputs/scope-approval.json` 已记录负责人审批。Hypit provider 当前只支持静音链路；需要模型原生音频时不要走 Hypit Build。真实生成可能产生费用，具体命令及 provider 能力以 `py -3.12 -m video_replicator.cli newapi --help` 和 `docs/OPERATIONS.md` 为准。
+
+### 三态门禁与运行清单
+
+每次分析都会在 `projects/<项目>/outputs/run-manifest.json` 写入运行清单，包含输入视频绝对路径、文件大小、修改时间、SHA-256、参数、步骤、产物路径和 QA 状态。视频内容不上传到仓库。
+
+- `blocked`：存在缺失输入、占位镜头、分段超限或其他阻断项，必须修复后重跑。
+- `review_required`：确定性检查已完成，但仍需要负责人审核范围、文案、音频/字幕策略或其他风险；不得提交付费生成。
+- `ready`：审核文件有效且没有阻断项，可以在费用确认后进入 provider 提交。
+
+人工审核文件示例（保存为项目的 `outputs/scope-approval.json`）：
+
+```json
+{
+  "status": "approved",
+  "reviewer": "负责人姓名",
+  "approved_at": "2026-09-24T12:00:00+08:00",
+  "notes": "确认替换对象、保留人物与构图、音频和字幕策略"
+}
+```
 
 生成时应一并提供：
 
@@ -152,8 +180,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\export-manual-generation-pack
 ## 测试
 
 ```powershell
-python -m unittest discover -s tests -v
+py -3.12 -m unittest discover -s tests -v
 npm --prefix .\packages\provider-newapi-video run build
+py -3.12 -m video_replicator.cli --help
 ```
 
 ## 隐私与安全

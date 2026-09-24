@@ -70,7 +70,7 @@
       "outputs": ["analysis/plan.json"],
       "acceptance": ["每个镜头 start 小于 end", "每个 segment 不超过时长上限", "风险和待人工确认项显式记录"],
       "approval_gate": "reference_scope",
-      "handoff": {"to": ["prompt_director"], "requires": ["analysis/plan.json", "approved scope"]}
+      "handoff": {"to": ["prompt_director"], "requires": ["analysis/plan.json", "scope-approval.json when required"]}
     },
     {
       "id": "deep_video_analyzer",
@@ -92,7 +92,7 @@
       "outputs": ["analysis/script-timeline.json", "adapted_script.md"],
       "acceptance": ["新文案与时间段一一对应", "原文案、改写文案和来源分开记录", "需要新配音或嘴型同步时显式标记"],
       "approval_gate": "reference_scope",
-      "handoff": {"to": ["prompt_director", "provider_adapter"], "requires": ["approved script strategy"]}
+      "handoff": {"to": ["prompt_director", "provider_adapter"], "requires": ["人工确认后的 script strategy"]}
     },
     {
       "id": "keyframe_curator",
@@ -123,16 +123,16 @@
       "responsibility": "执行确定性检查，汇总风险，并阻止缺少审批、素材或连续性信息的生成任务。",
       "inputs": ["analysis/plan.json", "outputs/prompts.json", "reference_collages/manifest.json"],
       "outputs": ["outputs/qa.json", "review decision"],
-      "acceptance": ["qa.status 为 approved 或 review_required", "所有 flags 可定位到具体产物", "review_required 时不得提交付费生成"],
+      "acceptance": ["qa.status 只能是 blocked、review_required 或 ready", "所有 flags 可定位到具体产物", "blocked 和 review_required 时不得提交付费生成"],
       "approval_gate": "generation_billing",
-      "handoff": {"to": ["provider_adapter"], "requires": ["qa.status=approved", "费用确认记录"]}
+      "handoff": {"to": ["provider_adapter"], "requires": ["qa.status=ready", "费用确认记录"]}
     },
     {
       "id": "provider_adapter",
       "display_name": "生成执行师",
       "implementation": "packages/provider-newapi-video/src/provider.ts",
       "responsibility": "把已批准的提示词和公网素材 URL 映射到目标视频 API；默认 dry-run，负责轮询和结果下载。",
-      "inputs": ["approved prompt", "public reference image URLs", "provider runtime configuration"],
+      "inputs": ["ready 状态的 prompt", "public reference image URLs", "provider runtime configuration"],
       "outputs": ["outputs/newapi/request.redacted.json", "outputs/newapi/status.json", "outputs/newapi/generated.mp4"],
       "acceptance": ["不记录 token", "未收到费用确认时只执行 check/plan/pricing 或 dry-run", "生成失败保留可诊断响应"],
       "approval_gate": "generation_billing",

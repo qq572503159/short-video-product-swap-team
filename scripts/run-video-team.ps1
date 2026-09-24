@@ -92,7 +92,13 @@ try {
     $qaFile = Join-Path $projectPath "outputs/qa.json"
     if (-not (Test-Path -LiteralPath $qaFile)) { throw "缺少 QA 文件，禁止提交: $qaFile" }
     $qa = Get-Content -LiteralPath $qaFile -Raw | ConvertFrom-Json
-    if ($qa.status -ne "approved") { throw "QA 状态为 $($qa.status)，禁止付费提交" }
+    if ($qa.status -ne "ready") { throw "QA 状态为 $($qa.status)，禁止付费提交；只有 ready 可以提交" }
+    $scopeApproval = Join-Path $projectPath "outputs/scope-approval.json"
+    if (-not (Test-Path -LiteralPath $scopeApproval)) { throw "缺少人工审核文件，禁止提交: $scopeApproval" }
+    $approval = Get-Content -LiteralPath $scopeApproval -Raw | ConvertFrom-Json
+    if ($approval.status -ne "approved" -or -not $approval.reviewer -or -not $approval.approved_at) {
+      throw "人工审核文件无效，禁止提交: $scopeApproval"
+    }
     if (-not (Test-Path -LiteralPath $compiledPrompt)) { throw "缺少已编译逐镜提示词，禁止提交: $compiledPrompt" }
     if (-not ((Test-Path -LiteralPath $run) -and (Test-Path -LiteralPath $author))) {
       throw "缺少 Hypit 运行文件，禁止提交: $run / $author"
@@ -124,8 +130,10 @@ try {
     }
   }
 
+  $teamReport = Get-Content -LiteralPath (Join-Path $projectPath "outputs/team-run-report.json") -Raw | ConvertFrom-Json
   $summary = [ordered]@{
-    status = if ($Submit) { "submitted" } else { "ready_for_billing_approval" }
+    workflow_status = [string]$teamReport.status
+    status = if ($Submit) { "submitted" } else { [string]$teamReport.status }
     project = (Resolve-Path $projectPath).Path
     manual_package = "$projectPath\outputs\manual-generation-package.zip"
     logs = $logs

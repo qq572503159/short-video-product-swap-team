@@ -28,6 +28,15 @@ powershell -ExecutionPolicy Bypass -File .\scripts\init-workspace.ps1 `
   -InstallNodeDependencies -InstallPython
 ```
 
+也可以显式执行安装命令，避免 Windows 上多个 Python 版本选错解释器：
+
+```powershell
+py -3.12 -m pip install -e .
+npm install
+npm --prefix .\packages\provider-newapi-video install
+npm --prefix .\packages\provider-newapi-video run build
+```
+
 脚本会检查 `node`、`npm`、`python`、`ffmpeg`，构建
 `packages/provider-newapi-video`，并在缺失时创建一个空的环境变量模板。它不会覆盖已有配置，也不会输出 token。
 
@@ -89,7 +98,7 @@ powershell -ExecutionPolicy Bypass `
 Python 直连链路使用 New API 的 `/v1/videos` 和 `/v1/videos/{task_id}`。默认是 dry-run，只写入脱敏请求，不会产生费用：
 
 ```powershell
-python -m video_replicator.cli newapi `
+py -3.12 -m video_replicator.cli newapi `
   --prompt-file .\projects\demo-9-16\outputs\final_product_swap_prompt.md `
   --project .\projects\demo-9-16 `
   --model minimax-h3-f `
@@ -101,7 +110,7 @@ python -m video_replicator.cli newapi `
 参考图和参考视频必须是公网可访问的 `http(s)` URL；本地路径不会被 API 接受。确认人物保留、产品替换、时长、画幅和预算后，才显式提交：
 
 ```powershell
-python -m video_replicator.cli newapi `
+py -3.12 -m video_replicator.cli newapi `
   --prompt-file .\projects\demo-9-16\outputs\final_product_swap_prompt.md `
   --reference-image-url https://example.invalid/product-front-back.png `
   --project .\projects\demo-9-16 `
@@ -114,6 +123,8 @@ python -m video_replicator.cli newapi `
 ```
 
 `--submit --confirm-billing` 会发起真实任务并可能产生费用。生成文件和脱敏记录写入 `projects/<name>/outputs/newapi/`。
+
+真实提交前必须满足三态门禁：`blocked` 表示禁止提交，`review_required` 表示等待人工审核，只有 `ready` 可以提交；`outputs/qa.json` 和 `outputs/scope-approval.json` 都会被检查。
 
 ## Hypit 命令与模型边界
 
@@ -143,6 +154,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\diagnose-workspace.ps1 -SkipN
 ```
 
 输出只报告配置是否存在，不显示任何 token 内容。若诊断提示环境文件存在但 token 未配置，请在本机编辑该文件后重新执行诊断。
+
+## 运行清单与测试
+
+`projects/<项目>/outputs/run-manifest.json` 记录输入视频 SHA-256、运行参数、步骤、产物和最终状态，便于复现与审计。提交问题时请优先附上该清单和脱敏日志，不要附 API token 或原始视频。
+
+```powershell
+py -3.12 -m unittest discover -s tests -v
+npm --prefix .\packages\provider-newapi-video run build
+py -3.12 -m video_replicator.cli --help
+```
 
 ## 常见排查顺序
 

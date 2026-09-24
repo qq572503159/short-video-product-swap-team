@@ -5,6 +5,11 @@ from pathlib import Path
 from typing import Any
 import json
 
+STATUS_BLOCKED = "blocked"
+STATUS_REVIEW_REQUIRED = "review_required"
+STATUS_READY = "ready"
+WORKFLOW_STATUSES = (STATUS_BLOCKED, STATUS_REVIEW_REQUIRED, STATUS_READY)
+
 
 @dataclass
 class VideoEvidence:

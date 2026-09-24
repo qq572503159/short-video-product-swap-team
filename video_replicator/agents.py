@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .schemas import ReplicationPlan, Shot, VideoEvidence
+from .schemas import STATUS_BLOCKED, STATUS_READY, STATUS_REVIEW_REQUIRED, ReplicationPlan, Shot, VideoEvidence
 
 
 @dataclass
@@ -659,13 +659,33 @@ class QAAgent:
 
     display_name = "质量验收官"
 
-    def run(self, plan: ReplicationPlan) -> dict[str, Any]:
+    def run(self, plan: ReplicationPlan, scope_approval: dict[str, Any] | None = None) -> dict[str, Any]:
         flags = list(plan.review_flags)
+        blocking_flags: list[str] = []
         if plan.segment_max_sec not in (15, 30):
-            flags.append("segment_max_sec 必须为 15 或 30")
+            blocking_flags.append("segment_max_sec 必须为 15 或 30")
         for segment in plan.segments:
             if segment["end"] - segment["start"] > plan.segment_max_sec + 1e-6:
-                flags.append(f"{segment['id']} 超过分段时长上限")
+                blocking_flags.append(f"{segment['id']} 超过分段时长上限")
         if not plan.prompts:
-            flags.append("尚未生成分段提示词")
-        return {"status": "review_required" if flags else "approved", "flags": flags}
+            blocking_flags.append("尚未生成分段提示词")
+        placeholder_flags = [flag for flag in flags if any(marker in flag for marker in ("待补充", "待判断", "TODO", "TBD"))]
+        blocking_flags.extend(placeholder_flags)
+        review_flags = [flag for flag in flags if flag not in placeholder_flags]
+        if blocking_flags:
+            status = STATUS_BLOCKED
+        else:
+            approval_ok = bool(
+                scope_approval
+                and str(scope_approval.get("status", "")).lower() == "approved"
+                and str(scope_approval.get("reviewer", "")).strip()
+                and str(scope_approval.get("approved_at", "")).strip()
+            )
+            if not approval_ok:
+                review_flags.append("等待负责人完成 scope-approval.json 人工确认")
+                status = STATUS_REVIEW_REQUIRED
+            elif review_flags:
+                status = STATUS_REVIEW_REQUIRED
+            else:
+                status = STATUS_READY
+        return {"status": status, "flags": review_flags, "blocking_flags": blocking_flags}

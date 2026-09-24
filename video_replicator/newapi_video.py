@@ -253,10 +253,20 @@ def run_newapi(
         raise ValueError("真实提交会产生费用，请同时传入 --confirm-billing")
     qa_path = qa_file or project_dir / "outputs" / "qa.json"
     if not qa_path.is_file():
-        raise ValueError(f"真实提交前必须存在 QA 文件且状态为 approved: {qa_path}")
+        raise ValueError(f"真实提交前必须存在 QA 文件且状态为 ready: {qa_path}")
     qa = json.loads(qa_path.read_text(encoding="utf-8-sig"))
-    if qa.get("status") != "approved":
+    if qa.get("status") != "ready":
         raise ValueError(f"QA 未通过，禁止真实提交: status={qa.get('status')!r}")
+    approval_path = project_dir / "outputs" / "scope-approval.json"
+    if not approval_path.is_file():
+        raise ValueError(f"真实提交前必须存在人工审核文件: {approval_path}")
+    approval = json.loads(approval_path.read_text(encoding="utf-8-sig"))
+    if (
+        str(approval.get("status", "")).lower() != "approved"
+        or not str(approval.get("reviewer", "")).strip()
+        or not str(approval.get("approved_at", "")).strip()
+    ):
+        raise ValueError(f"人工审核文件无效，禁止真实提交: {approval_path}")
     if require_compiled_prompt:
         compiled = project_dir / "outputs" / "final_product_swap_prompt.md"
         if not compiled.is_file() or not compiled.read_text(encoding="utf-8-sig").strip():

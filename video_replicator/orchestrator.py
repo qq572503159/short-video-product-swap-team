@@ -11,6 +11,7 @@ from .transcription import transcribe_video
 from .gemini_review import run_gemini_review
 from .script_timeline import run_script_timeline
 from .schemas import ReplicationPlan, Shot, VideoEvidence, read_json, write_json
+from .run_manifest import input_record, utc_now, write_run_manifest
 
 
 class Orchestrator:
@@ -24,8 +25,22 @@ class Orchestrator:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def analyze(self, video: Path) -> VideoEvidence:
+        started_at = utc_now()
         evidence = AnalyzerAgent().run(video, self.analysis_dir)
         write_json(self.analysis_dir / "evidence.json", evidence)
+        write_run_manifest(self.output_dir / "run-manifest.json", {
+            "schema_version": "run-manifest@1",
+            "status": "blocked" if not video.is_file() else "review_required",
+            "started_at": started_at,
+            "updated_at": utc_now(),
+            "input_video": input_record(video),
+            "steps": [{
+                "agent": AnalyzerAgent.display_name,
+                "status": "blocked" if not video.is_file() else "completed",
+                "output": str((self.analysis_dir / "evidence.json").resolve()),
+            }],
+            "artifacts": {"evidence": str((self.analysis_dir / "evidence.json").resolve())},
+        })
         return evidence
 
     def deep_analyze(
@@ -68,8 +83,10 @@ class Orchestrator:
         write_json(self.output_dir / "prompts.json", plan)
         return plan
 
-    def qa(self, plan: ReplicationPlan) -> dict:
-        result = QAAgent().run(plan)
+    def qa(self, plan: ReplicationPlan, scope_approval_path: Path | None = None) -> dict:
+        scope_approval_path = scope_approval_path or self.output_dir / "scope-approval.json"
+        approval = read_json(scope_approval_path) if scope_approval_path.is_file() else None
+        result = QAAgent().run(plan, approval)
         write_json(self.output_dir / "qa.json", result)
         return result
 
@@ -105,11 +122,54 @@ class Orchestrator:
         plan = self.plan(evidence, segment_max_sec, aspect_ratio)
         plan = self.prompts(plan)
         qa = self.qa(plan)
-        return {"project_dir": str(self.project_dir), "qa": qa}
+        return {"status": qa["status"], "project_dir": str(self.project_dir), "qa": qa}
 
     def team_run(self, video: Path, segment_max_sec: int, aspect_ratio: str, transcription_language: str | None = None, transcription_model: str = "small") -> dict:
         steps: list[dict] = []
         evidence = self.analyze(video)
+        if not video.is_file():
+            qa = {
+                "status": "blocked",
+                "flags": [],
+                "blocking_flags": [f"输入视频不存在: {video.resolve()}"],
+            }
+            write_json(self.output_dir / "qa.json", qa)
+            steps.append({
+                "agent": AnalyzerAgent.display_name,
+                "status": "blocked",
+                "output": str(self.analysis_dir / "evidence.json"),
+                "error": qa["blocking_flags"][0],
+            })
+            result = {
+                "status": "blocked",
+                "project_dir": str(self.project_dir.resolve()),
+                "steps": steps,
+                "qa": qa,
+                "parameters": {
+                    "segment_max_sec": segment_max_sec,
+                    "aspect_ratio": aspect_ratio,
+                    "transcription_language": transcription_language,
+                    "transcription_model": transcription_model,
+                },
+                "next_gate": "补充有效输入视频后重试",
+            }
+            write_json(self.output_dir / "team-run-report.json", result)
+            manifest_path = self.output_dir / "run-manifest.json"
+            manifest = read_json(manifest_path) if manifest_path.exists() else {}
+            manifest.update({
+                "status": "blocked",
+                "updated_at": utc_now(),
+                "steps": steps,
+                "qa": qa,
+                "parameters": result["parameters"],
+                "artifacts": {
+                    **manifest.get("artifacts", {}),
+                    "team_report": str((self.output_dir / "team-run-report.json").resolve()),
+                    "qa": str((self.output_dir / "qa.json").resolve()),
+                },
+            })
+            write_run_manifest(manifest_path, manifest)
+            return result
         steps.append({
             "agent": AnalyzerAgent.display_name,
             "status": "completed",
@@ -157,12 +217,35 @@ class Orchestrator:
             "flags": qa["flags"],
         })
         result = {
-            "status": "review_required" if qa["flags"] else "ready_for_generation",
+            "status": qa["status"],
             "project_dir": str(self.project_dir.resolve()),
             "steps": steps,
+            "qa": qa,
+            "parameters": {
+                "segment_max_sec": segment_max_sec,
+                "aspect_ratio": aspect_ratio,
+                "transcription_language": transcription_language,
+                "transcription_model": transcription_model,
+            },
             "next_gate": "人工确认产品替换边界、隐私和预计费用后才能提交外部生成",
         }
         write_json(self.output_dir / "team-run-report.json", result)
+        manifest_path = self.output_dir / "run-manifest.json"
+        manifest = read_json(manifest_path) if manifest_path.exists() else {}
+        manifest.update({
+            "status": qa["status"],
+            "updated_at": utc_now(),
+            "steps": steps,
+            "qa": qa,
+            "parameters": result["parameters"],
+            "artifacts": {
+                **manifest.get("artifacts", {}),
+                "team_report": str((self.output_dir / "team-run-report.json").resolve()),
+                "qa": str((self.output_dir / "qa.json").resolve()),
+                "scope_approval": str((self.output_dir / "scope-approval.json").resolve()),
+            },
+        })
+        write_run_manifest(manifest_path, manifest)
         return result
 
     def sync(self, video: Path, shots_path: Path | None = None, chrome: Path | None = None, timeout_sec: int = 120) -> dict:

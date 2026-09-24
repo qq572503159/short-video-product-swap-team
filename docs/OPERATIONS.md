@@ -126,7 +126,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\hypit-newapi.ps1 plan .\proje
 powershell -ExecutionPolicy Bypass -File .\scripts\hypit-newapi.ps1 pricing .\projects\demo-9-16\hypit\product-swap.svrun --json
 ```
 
-当前 `hypit.runtime.json` 的绑定仍是 `@hypit/seedance@1#seedance-2-mini`，其 wire model 是 `seedance-2.0-mini`。它与 Python 直连的 `minimax-h3-f` 是两条不同链路；不要只修改显示名称来混用模型。真正切换 Hypit 模型前，需要同步更新 capability、provider 契约和运行时配置，并重新做费用与响应格式验证。
+当前 `hypit.runtime.json` 的绑定仍是 `@hypit/seedance@1#seedance-2-mini`，其 wire model 是 `seedance-2.0-mini`。它与 Python 直连的 `minimax-h3-f` 是两条不同链路；不要只修改显示名称来混用模型。当前 Hypit provider 明确不支持 `generateAudio=true`，只能走静音/后期音频路线；需要视频模型原生音频时使用 Python New API 路线，并通过 QA 和费用门禁。真正切换 Hypit 模型前，需要同步更新 capability、provider 契约和运行时配置，并重新做费用与响应格式验证。
 
 ## 诊断
 

@@ -10,10 +10,12 @@ task that must be polled through ``/v1/videos/{id}``.
 import json
 import os
 import time
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 
@@ -58,6 +60,10 @@ class NewAPIConfig:
     def validate(self, require_token: bool = True) -> None:
         if not self.base_url.startswith(("http://", "https://")):
             raise ValueError("NEW_API_URL 必须是 http(s) URL")
+        parsed = urlsplit(self.base_url)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme != "https" and host not in {"localhost", "127.0.0.1", "::1"}:
+            raise ValueError("NEW_API_URL 远程地址必须使用 HTTPS；HTTP 仅允许本机回环地址")
         if require_token and not self.token:
             raise ValueError(f"未找到 NEW_API_TOKEN，请配置 {self.env_file}")
 
@@ -67,6 +73,10 @@ def _redact(value: Any) -> Any:
         return {k: ("***REDACTED***" if k.lower() in {"token", "authorization", "api_key"} else _redact(v)) for k, v in value.items()}
     if isinstance(value, list):
         return [_redact(v) for v in value]
+    if isinstance(value, str) and value.startswith(("http://", "https://")):
+        parsed = urlsplit(value)
+        query = [(key, "***REDACTED***") for key, _ in parse_qsl(parsed.query, keep_blank_values=True)]
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), ""))
     return value
 
 
@@ -164,7 +174,7 @@ class NewAPIVideoClient:
     def result_url(response: dict[str, Any]) -> str | None:
         data = response.get("data")
         if isinstance(data, dict):
-            return response.get("video_url") or response.get("url") or data.get("url")
+            return response.get("video_url") or response.get("url") or data.get("video_url") or data.get("url")
         return response.get("video_url") or response.get("url")
 
     def wait_for_completion(self, task_id: str, *, interval: float = 3.0, timeout: float = 900.0) -> dict[str, Any]:
@@ -173,12 +183,13 @@ class NewAPIVideoClient:
         if timeout <= 0:
             raise ValueError("轮询超时必须大于 0 秒")
         deadline = time.monotonic() + timeout
-        terminal = {"completed", "failed", "cancelled", "canceled", "error"}
+        success_states = {"completed", "succeeded", "success"}
+        terminal = success_states | {"failed", "cancelled", "canceled", "error", "expired"}
         while True:
             response = self.status(task_id)
             state = str(response.get("status", "")).lower()
             if state in terminal:
-                if state != "completed":
+                if state not in success_states:
                     raise RuntimeError(f"视频任务失败（{state}）: {response}")
                 if not self.result_url(response):
                     raise RuntimeError(f"任务已完成但响应缺少视频 URL: {response}")
@@ -218,6 +229,8 @@ def run_newapi(
     dry_run: bool = True,
     confirm_billing: bool = False,
     poll_interval: float = 3.0,
+    qa_file: Path | None = None,
+    require_compiled_prompt: bool = True,
 ) -> dict[str, Any]:
     client = NewAPIVideoClient()
     selected_model = model or client.config.model or "minimax-h3-f"
@@ -233,11 +246,25 @@ def run_newapi(
     )
     output_dir = project_dir / "outputs" / "newapi"
     output_dir.mkdir(parents=True, exist_ok=True)
-    write_json(output_dir / "request.redacted.json", _redact(payload))
     if dry_run:
+        write_json(output_dir / "request.redacted.json", _redact(payload))
         return {"status": "dry_run", "model": selected_model, "request": str(output_dir / "request.redacted.json")}
     if not confirm_billing:
         raise ValueError("真实提交会产生费用，请同时传入 --confirm-billing")
+    qa_path = qa_file or project_dir / "outputs" / "qa.json"
+    if not qa_path.is_file():
+        raise ValueError(f"真实提交前必须存在 QA 文件且状态为 approved: {qa_path}")
+    qa = json.loads(qa_path.read_text(encoding="utf-8-sig"))
+    if qa.get("status") != "approved":
+        raise ValueError(f"QA 未通过，禁止真实提交: status={qa.get('status')!r}")
+    if require_compiled_prompt:
+        compiled = project_dir / "outputs" / "final_product_swap_prompt.md"
+        if not compiled.is_file() or not compiled.read_text(encoding="utf-8-sig").strip():
+            raise ValueError(f"真实提交前必须存在已编译提示词: {compiled}")
+    run_id = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    output_dir = output_dir / f"run-{run_id}"
+    output_dir.mkdir(parents=True, exist_ok=False)
+    write_json(output_dir / "request.redacted.json", _redact(payload))
     created = client.create(payload)
     write_json(output_dir / "create_response.json", _redact(created))
     task_id = client.task_id(created)
@@ -246,4 +273,4 @@ def run_newapi(
     video_url = client.result_url(completed)
     assert video_url
     destination = client.download(video_url, output_dir / "generated.mp4")
-    return {"status": "completed", "task_id": task_id, "video_url": video_url, "output": str(destination)}
+    return {"status": "completed", "task_id": task_id, "video_url": _redact(video_url), "output": str(destination)}

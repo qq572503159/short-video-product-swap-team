@@ -20,13 +20,19 @@ New-Item -ItemType Directory -Force -Path $productRefs | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $project "analysis") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $project "outputs") | Out-Null
 Copy-Item -LiteralPath $ReferenceVideo -Destination (Join-Path $project "inputs\reference.mp4")
-Copy-Item -LiteralPath $ProductFrontBack -Destination (Join-Path $productRefs "product-front-back.png")
-Copy-Item -LiteralPath $ProductMultiAngle -Destination (Join-Path $productRefs "product-multi-angle.png")
+$frontExt = [IO.Path]::GetExtension($ProductFrontBack).ToLowerInvariant()
+$multiExt = [IO.Path]::GetExtension($ProductMultiAngle).ToLowerInvariant()
+if (-not $frontExt) { $frontExt = ".bin" }
+if (-not $multiExt) { $multiExt = ".bin" }
+$frontName = "product-front-back$frontExt"
+$multiName = "product-multi-angle$multiExt"
+Copy-Item -LiteralPath $ProductFrontBack -Destination (Join-Path $productRefs $frontName)
+Copy-Item -LiteralPath $ProductMultiAngle -Destination (Join-Path $productRefs $multiName)
 
 [ordered]@{
   name = $ProductName
   description = $ProductDescription
-  references = @("inputs/product_refs/product-front-back.png", "inputs/product_refs/product-multi-angle.png")
+  references = @("inputs/product_refs/$frontName", "inputs/product_refs/$multiName")
 } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $project "inputs\product.json") -Encoding UTF8
 
 [ordered]@{
@@ -38,7 +44,7 @@ Copy-Item -LiteralPath $ProductMultiAngle -Destination (Join-Path $productRefs "
   forbid = @("改变人物或场景", "新增人物或道具", "错误品牌、包装或标签")
   segment_max_sec = 15
   aspect_ratio = "9:16"
-  audio_strategy = "生成无声画面，本地接回经授权的原音轨"
+  audio_strategy = "待需求确认：原音、模型原生音频或新配音"
 } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $project "replication_manifest.json") -Encoding UTF8
 
 Write-Output "已创建项目: $project"

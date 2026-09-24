@@ -103,7 +103,7 @@ def build_deep_analysis(evidence: VideoEvidence, manifest: dict[str, Any] | None
     streams = evidence.metadata.get("streams", [])
     video_stream = next((item for item in streams if item.get("codec_type") == "video"), {})
     # Source captions are intentionally not part of the replication timeline.
-    boundaries = _boundaries(evidence, transcript, [], duration, segment_seconds)
+    boundaries = _boundaries(evidence, transcript, ocr, duration, segment_seconds)
     segments = []
     index = 1
     for cursor, end in zip(boundaries, boundaries[1:]):

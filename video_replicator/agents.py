@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -430,7 +431,7 @@ class KeyframeCurationAgent:
         height = rows * (header_height + tile_height) + (rows + 1) * gap
         canvas = image_module.new("RGB", (width, height), "#f1f3f6")
         font = image_font.load_default()
-        for offset in range(frames_per_sheet):
+        for offset in range(len(frames)):
             row, column = divmod(offset, columns)
             x = gap + column * (tile_width + gap)
             y = gap + row * (header_height + tile_height + gap)
@@ -451,8 +452,6 @@ class KeyframeCurationAgent:
                     tile = image_module.new("RGB", (tile_width, tile_height), "black")
                     tile.paste(fitted, ((tile_width - fitted.width) // 2, (tile_height - fitted.height) // 2))
                     canvas.paste(tile, (x, image_y))
-            else:
-                draw.rectangle((x, image_y, x + tile_width, image_y + tile_height), fill="#d9dde3")
         canvas.save(output, format="JPEG", quality=92, optimize=True, progressive=True)
 
 
@@ -469,7 +468,19 @@ class AnalyzerAgent:
 
         artifacts_dir = artifacts_dir or video.parent / f"{video.stem}-analysis"
         artifacts_dir.mkdir(parents=True, exist_ok=True)
-        shots_script = Path.home() / ".codex" / "skills" / "video-shots" / "scripts" / "video-shots.mjs"
+        skill_roots = [
+            Path(os.environ["CODEX_SKILLS_ROOT"]) if os.environ.get("CODEX_SKILLS_ROOT") else None,
+            Path.home() / ".codex" / "skills",
+            Path.home() / ".agents" / "skills",
+        ]
+        shots_script = next(
+            (
+                root / "video-shots" / "scripts" / "video-shots.mjs"
+                for root in skill_roots
+                if root and (root / "video-shots" / "scripts" / "video-shots.mjs").exists()
+            ),
+            Path.home() / ".codex" / "skills" / "video-shots" / "scripts" / "video-shots.mjs",
+        )
         node = shutil.which("node")
         if node and shots_script.exists():
             self._run_video_shots(node, shots_script, video, artifacts_dir, evidence)
@@ -576,7 +587,11 @@ class StoryPlannerAgent:
                 risks=["当前为骨架计划，尚未完成逐镜头视觉取证"],
             )]
         segments = self._segment_shots(shots, segment_max_sec)
-        flags = ["需要人工审核参考边界、产品/受众和分段上限"]
+        flags: list[str] = []
+        for shot in shots:
+            if any(marker in " ".join([shot.subject, shot.action, shot.camera, shot.continuity])
+                   for marker in ("待由", "待判断", "待补充", "TODO", "TBD")):
+                flags.append(f"{shot.id} 仍含待补充镜头字段")
         return ReplicationPlan(duration, segment_max_sec, aspect_ratio, shots, segments, [], flags)
 
     @staticmethod

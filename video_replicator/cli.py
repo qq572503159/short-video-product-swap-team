@@ -102,6 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
     newapi.add_argument("--generate-audio", action=argparse.BooleanOptionalAction, default=False, help="请求视频模型同步生成音频")
     newapi.add_argument("--submit", action="store_true", help="提交真实生成任务；需同时传 --confirm-billing")
     newapi.add_argument("--confirm-billing", action="store_true", help="确认第三方 API 可能产生费用")
+    newapi.add_argument("--qa-file", type=Path, help="真实提交前的 QA JSON；默认使用项目 outputs/qa.json")
+    newapi.add_argument("--require-compiled-prompt", action=argparse.BooleanOptionalAction, default=True, help="真实提交前要求项目存在已编译的最终提示词")
     newapi.add_argument("--poll-interval", type=float, default=3.0)
     return parser
 
@@ -157,6 +159,8 @@ def main() -> None:
             dry_run=not args.submit,
             confirm_billing=args.confirm_billing,
             poll_interval=args.poll_interval,
+            qa_file=args.qa_file,
+            require_compiled_prompt=args.require_compiled_prompt,
         )
     payload = result if isinstance(result, dict) else asdict(result) if is_dataclass(result) else result
     print(json.dumps(payload, ensure_ascii=False, indent=2))

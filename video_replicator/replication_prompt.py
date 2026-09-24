@@ -63,11 +63,20 @@ def validate_framework(framework: dict[str, Any], timeline: dict[str, Any]) -> N
         raise ValueError("逐镜蓝图必须覆盖到视频结束时间")
 
     previous_end = 0.0
-    for segment in segments:
+    for index, segment in enumerate(segments):
+        for key in ("id", "start", "end", "adapted_dialogue"):
+            if key not in segment:
+                raise ValueError(f"文案片段 {segment.get('id', '?')} 缺少必填字段 {key}")
         start, end = float(segment["start"]), float(segment["end"])
         if start < previous_end - 0.05 or end <= start or end > duration + 0.05:
             raise ValueError(f"文案片段 {segment.get('id', '?')} 时间无效或顺序重叠")
+        if index == 0 and abs(start) > 0.05:
+            raise ValueError("文案时间轴必须从 0 秒开始")
+        if any(marker in str(segment.get("adapted_dialogue", "")) for marker in PLACEHOLDERS):
+            raise ValueError(f"文案片段 {segment.get('id', '?')} 的改写文案仍含待补充占位内容")
         previous_end = end
+    if abs(previous_end - duration) > 0.05:
+        raise ValueError("文案时间轴必须覆盖到视频结束时间")
 
 
 def _copy_overlapping(timeline: dict[str, Any], start: float, end: float) -> list[dict[str, Any]]:

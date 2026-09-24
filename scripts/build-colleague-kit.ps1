@@ -5,6 +5,11 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $dist = Join-Path $root $OutputDirectory
+$resolvedRoot = [IO.Path]::GetFullPath($root).TrimEnd("\")
+$resolvedDist = [IO.Path]::GetFullPath($dist)
+if (-not $resolvedDist.StartsWith("$resolvedRoot\", [StringComparison]::OrdinalIgnoreCase)) {
+  throw "OutputDirectory 必须位于仓库根目录内，拒绝递归删除: $OutputDirectory"
+}
 $stage = Join-Path $dist "short-video-product-swap-team"
 $zip = "$stage.zip"
 
@@ -24,9 +29,11 @@ Get-ChildItem -LiteralPath $stage -File -Recurse -Filter "*.pyc" |
 $providerStage = Join-Path $stage "packages\provider-newapi-video"
 New-Item -ItemType Directory -Force -Path $providerStage | Out-Null
 Copy-Item -LiteralPath (Join-Path $root "packages\provider-newapi-video\src") -Destination $providerStage -Recurse -Force
-Copy-Item -LiteralPath (Join-Path $root "packages\provider-newapi-video\dist") -Destination $providerStage -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $root "packages\provider-newapi-video\package.json") -Destination $providerStage
 Copy-Item -LiteralPath (Join-Path $root "packages\provider-newapi-video\tsconfig.json") -Destination $providerStage
+if (Test-Path -LiteralPath (Join-Path $root "packages\provider-newapi-video\package-lock.json")) {
+  Copy-Item -LiteralPath (Join-Path $root "packages\provider-newapi-video\package-lock.json") -Destination $providerStage
+}
 
 foreach ($file in @(
   "README.md",

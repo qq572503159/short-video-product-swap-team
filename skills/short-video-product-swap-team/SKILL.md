@@ -31,6 +31,7 @@ description: 使用中文多智能体团队拆解并复刻短视频，保留人�
 - 真实生成前必须展示模型、时长、分辨率、参考素材数量和预计费用。没有明确费用确认时，只执行本地处理、dry-run、`check`、`plan` 和 `pricing`。
 - 每次都准备两种交付：直接生成成片，以及可供其他平台使用的 ZIP 素材包和中文教程。
 - 使用 `video-replicator replication-prompt` 从 `replication-framework.json` 和 `script-timeline.json` 编译 API 提示词；编译器会阻止未完成的镜头字段和无效时间轴。
+- 真实提交前必须存在审核后的 `analysis/replication-framework.json`、编译后的 `outputs/final_product_swap_prompt.md` 和 `outputs/qa.json`（状态为 `approved`）；Hypit provider 当前不支持原生音频。
 - 密钥只保存在 Credential Store 或本机环境文件中，不进入代码、运行时 JSON、日志、截图或 Git。
 
 ## 路由

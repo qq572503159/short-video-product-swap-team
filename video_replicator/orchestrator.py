@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import shutil
 import subprocess
 
@@ -169,7 +170,19 @@ class Orchestrator:
         if not shots_path.exists():
             return {"status": "failed", "error": f"找不到 shots.json: {shots_path}"}
         node = shutil.which("node")
-        script = Path.home() / ".codex" / "skills" / "video-sync" / "scripts" / "video-sync.mjs"
+        skill_roots = [
+            Path(os.environ["CODEX_SKILLS_ROOT"]) if os.environ.get("CODEX_SKILLS_ROOT") else None,
+            Path.home() / ".codex" / "skills",
+            Path.home() / ".agents" / "skills",
+        ]
+        script = next(
+            (
+                root / "video-sync" / "scripts" / "video-sync.mjs"
+                for root in skill_roots
+                if root and (root / "video-sync" / "scripts" / "video-sync.mjs").exists()
+            ),
+            Path.home() / ".codex" / "skills" / "video-sync" / "scripts" / "video-sync.mjs",
+        )
         if not node or not script.exists():
             return {"status": "failed", "error": "未找到 video-sync 或 Node.js"}
         output = self.output_dir / "synced-shot-review.mp4"

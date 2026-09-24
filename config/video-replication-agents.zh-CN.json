@@ -101,7 +101,7 @@
       "responsibility": "按时间顺序整理关键帧；默认每秒一帧，每三帧或六帧拼成一张参考图，并使用全局连续 Shot 编号。",
       "inputs": ["analysis/evidence.json", "analysis/frames/", "inputs/reference.mp4 (local fallback)"],
       "outputs": ["outputs/reference_collages/shot-sheet-*.jpg", "outputs/reference_collages/manifest.json"],
-      "acceptance": ["每张拼图最多三张连续帧", "编号全局连续且不按拼图重置", "manifest 记录时间戳、来源和警告", "不上传原始视频"],
+      "acceptance": ["每张拼图按配置包含 3 张或 6 张连续帧，末组只保留实际帧数", "编号全局连续且不按拼图重置", "manifest 记录时间戳、来源和警告", "不上传原始视频"],
       "approval_gate": "reference_scope",
       "handoff": {"to": ["prompt_director"], "requires": ["至少一张有效 shot-sheet", "manifest.json"]}
     },

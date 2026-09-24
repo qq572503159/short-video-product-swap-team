@@ -7,7 +7,7 @@ name = "video-replicator"
 version = "0.1.0"
 description = "Local multi-agent workflow for short-video breakdown and replication planning"
 requires-python = ">=3.10"
-dependencies = ["Pillow>=10"]
+dependencies = ["Pillow>=10", "python-dotenv>=1.0", "requests>=2.31"]
 
 [project.scripts]
 video-replicator = "video_replicator.cli:main"

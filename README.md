@@ -91,7 +91,16 @@ python -m video_replicator.cli prompts .\projects\my-campaign\analysis\plan.json
 python -m video_replicator.cli --help
 ```
 
-复核逐镜蓝图与新文案。若要改对白/字幕，编辑项目 `analysis/` 中对应 timeline/script 产物，并再次 QA。字幕不必沿用参考视频里的字幕，可明确要求清除或按新文案生成。
+需要把模型生成的静音视频与改写文案时间轴合成为本地配音时，可使用参数化脚本：
+
+```powershell
+python .\scripts\build_exact_voiceover.py `
+  --project .\projects\my-campaign `
+  --video .\projects\my-campaign\outputs\newapi\generated.mp4 `
+  --timeline .\projects\my-campaign\analysis\script-timeline.json
+```
+
+复核逐镜蓝图与新文案。若要改对白/字幕，编辑项目 `analysis/` 中对应 timeline/script 产物，并再次 QA。字幕不必沿用参考视频里的字幕，可明确要求清除或按新文案生成。若要真实生成，必须提供人工审核后的 `analysis/replication-framework.json`；入口会编译成 `outputs/final_product_swap_prompt.md`，缺失或 QA 未通过时会阻止提交。
 
 ### 关键帧编辑建议
 
@@ -111,7 +120,7 @@ Gemini（可选）使用 `GEMINI_API_KEY` 环境变量。不要将密钥放进�
 
 ### Dry-run 与真实生成
 
-默认先 dry-run，检查提示词、参考素材和脱敏请求；Hypit `check`、`plan`、`pricing` 是只读准备步骤。只有在确认替换范围、模型、生成声音/字幕策略、时长、分辨率和费用后，才使用 CLI 的真实提交选项。真实生成可能产生费用，具体命令及 provider 能力以 `python -m video_replicator.cli newapi --help` 和 `docs/OPERATIONS.md` 为准。
+默认先 dry-run，检查提示词、参考素材和脱敏请求；Hypit `check`、`plan`、`pricing` 是只读准备步骤。只有在确认替换范围、模型、生成声音/字幕策略、时长、分辨率和费用后，才使用 CLI 的真实提交选项。Python New API 真实提交还要求 `outputs/qa.json` 的状态为 `approved`，并要求已有最终逐镜提示词。Hypit provider 当前只支持静音链路；需要模型原生音频时不要走 Hypit Build。真实生成可能产生费用，具体命令及 provider 能力以 `python -m video_replicator.cli newapi --help` 和 `docs/OPERATIONS.md` 为准。
 
 生成时应一并提供：
 

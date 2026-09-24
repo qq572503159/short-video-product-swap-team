@@ -1,29 +1,10 @@
 from __future__ import annotations
 
+import argparse
 import json
 import shutil
 import subprocess
 from pathlib import Path
-
-
-ROOT = Path(__file__).resolve().parents[1]
-RUN = ROOT / "projects/demo-9-22/outputs/newapi/edited-sheets-run-20260923"
-VOICE = "zh-CN-YunyangNeural"
-
-SEGMENTS = [
-    ("T01", 0.00, 0.76, "先好了"),
-    ("T02", 0.76, 1.60, "没有多少单"),
-    ("T03", 1.60, 2.56, "注意手速"),
-    ("T04", 2.56, 3.20, "这个"),
-    ("T05", 3.20, 5.36, "这个酒特别特别的好喝"),
-    ("T06", 5.36, 8.16, "之前你们花大几百"),
-    ("T07", 8.16, 9.80, "只买了这么一瓶酒"),
-    ("T08", 9.80, 10.64, ""),
-    ("T09", 10.64, 12.16, "赶紧去退了吧"),
-    ("T10", 12.16, 12.56, "好"),
-    ("T11", 12.56, 13.92, "现在酒厂做活动"),
-    ("T12", 13.92, 15.00, "一整箱6瓶"),
-]
 
 
 def run(*args: str) -> None:
@@ -38,21 +19,51 @@ def duration(path: Path) -> float:
     return float(out.strip())
 
 
+def load_segments(path: Path) -> list[tuple[str, float, float, str]]:
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
+    result = []
+    for index, item in enumerate(data.get("segments", []), start=1):
+        start, end = float(item["start"]), float(item["end"])
+        text = str(item.get("adapted_dialogue", "")).strip()
+        result.append((str(item.get("id") or f"T{index:02d}"), start, end, text))
+    if not result:
+        raise ValueError(f"时间轴没有 segments: {path}")
+    return result
+
+
 def main() -> None:
-    if shutil.which("edge-tts") is None or shutil.which("ffmpeg") is None:
-        raise SystemExit("需要 edge-tts 和 ffmpeg")
-    audio_dir = RUN / "exact-voiceover"
+    parser = argparse.ArgumentParser(description="按项目文案时间轴生成并合并本地配音")
+    parser.add_argument("--project", type=Path, required=True)
+    parser.add_argument("--video", type=Path, help="待合并视频；默认项目 outputs/newapi/generated.mp4")
+    parser.add_argument("--timeline", type=Path, help="script-timeline.json；默认项目 analysis/script-timeline.json")
+    parser.add_argument("--voice", default="zh-CN-YunyangNeural")
+    args = parser.parse_args()
+
+    if shutil.which("edge-tts") is None or shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        raise SystemExit("需要 edge-tts、ffmpeg 和 ffprobe")
+
+    project = args.project.resolve()
+    source_video = (args.video or project / "outputs/newapi/generated.mp4").resolve()
+    timeline = (args.timeline or project / "analysis/script-timeline.json").resolve()
+    if not source_video.is_file():
+        raise SystemExit(f"找不到输入视频: {source_video}")
+    if not timeline.is_file():
+        raise SystemExit(f"找不到文案时间轴: {timeline}")
+
+    segments = load_segments(timeline)
+    audio_dir = source_video.parent / "exact-voiceover"
     audio_dir.mkdir(parents=True, exist_ok=True)
     normalized: list[Path] = []
 
-    for seg_id, start, end, text in SEGMENTS:
+    for seg_id, start, end, text in segments:
         target = end - start
+        if target <= 0:
+            raise ValueError(f"{seg_id} 时间范围无效")
         out = audio_dir / f"{seg_id}.wav"
         if text:
             raw = audio_dir / f"{seg_id}.mp3"
-            run("edge-tts", "--voice", VOICE, "--text", text, "--rate", "+0%", "--write-media", str(raw))
-            src = duration(raw)
-            ratio = max(0.5, min(2.0, src / target))
+            run("edge-tts", "--voice", args.voice, "--text", text, "--rate", "+0%", "--write-media", str(raw))
+            ratio = max(0.5, min(2.0, duration(raw) / target))
             run(
                 "ffmpeg", "-y", "-i", str(raw),
                 "-filter:a", f"atempo={ratio:.6f},apad,atrim=duration={target:.3f}",
@@ -66,24 +77,22 @@ def main() -> None:
         normalized.append(out)
 
     concat = audio_dir / "concat.txt"
-    concat.write_text("\n".join(f"file '{p.as_posix()}'" for p in normalized) + "\n", encoding="utf-8")
+    concat.write_text("\n".join(f"file '{path.as_posix()}'" for path in normalized) + "\n", encoding="utf-8")
     voiceover = audio_dir / "exact-voiceover.wav"
     run("ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat), "-c", "copy", str(voiceover))
 
-    source_video = RUN / "generated.mp4"
-    output_video = RUN / "generated-exact-voiceover.mp4"
+    output_video = source_video.with_name(f"{source_video.stem}-exact-voiceover{source_video.suffix}")
     run(
         "ffmpeg", "-y", "-i", str(source_video), "-i", str(voiceover),
         "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac",
         "-b:a", "128k", "-shortest", str(output_video),
     )
     report = {
-        "voice": VOICE,
-        "segments": [{"id": i, "start": s, "end": e, "text": t} for i, s, e, t in SEGMENTS],
+        "voice": args.voice,
+        "segments": [{"id": i, "start": s, "end": e, "text": t} for i, s, e, t in segments],
         "input_video": str(source_video),
         "output_video": str(output_video),
         "audio": str(voiceover),
-        "note": "T08 9.80-10.64s intentionally silent to preserve the approved timeline.",
     }
     (audio_dir / "manifest.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(output_video)

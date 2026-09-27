@@ -124,7 +124,13 @@ py -3.12 -m video_replicator.cli newapi `
 
 `--submit --confirm-billing` 会发起真实任务并可能产生费用。生成文件和脱敏记录写入 `projects/<name>/outputs/newapi/`。
 
-真实提交前必须满足三态门禁：`blocked` 表示禁止提交，`review_required` 表示等待人工审核，只有 `ready` 可以提交；`outputs/qa.json` 和 `outputs/scope-approval.json` 都会被检查。
+真实提交前必须满足三态门禁：`blocked` 表示禁止提交，`review_required` 表示等待人工审核，只有 `ready` 可以提交。Python New API 路线先对最终提示词、参考 URL、模型和生成参数做 dry-run；再运行 `review-context`，把完整 `artifact_hashes` 写入人工审批文件，执行最终 QA：
+
+```powershell
+py -3.12 -m video_replicator.cli qa-finalize --project .\projects\demo-9-16
+```
+
+`outputs/qa.json`、`outputs/scope-approval.json` 会与当前输入视频、产品图、逐镜框架、文案、最终提示词、拼图、New API 请求指纹，以及存在时的 Hypit `.svrun`/`.svml` 做哈希比对。请求指纹包含模型、时长、画幅、分辨率、音频选项和完整参考 URL 的 SHA-256，不保存签名 URL 原文。任一输入或参数变化都必须重新 dry-run 和审核；New API 真实提交只使用 `final_product_swap_prompt.md` 中与审批哈希匹配的内容。
 
 ## Hypit 命令与模型边界
 
@@ -157,7 +163,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\diagnose-workspace.ps1 -SkipN
 
 ## 运行清单与测试
 
-`projects/<项目>/outputs/run-manifest.json` 记录输入视频 SHA-256、运行参数、步骤、产物和最终状态，便于复现与审计。提交问题时请优先附上该清单和脱敏日志，不要附 API token 或原始视频。
+`projects/<项目>/outputs/run-manifest.json` 指向最近一次运行；每次运行的独立副本保存在 `outputs/runs/<run_id>/run-manifest.json`。清单记录输入视频 SHA-256、运行参数、步骤、产物和最终状态，便于复现与审计。提交问题时请优先附上清单和脱敏日志，不要附 API token 或原始视频。
 
 ```powershell
 py -3.12 -m unittest discover -s tests -v

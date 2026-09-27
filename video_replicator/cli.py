@@ -89,6 +89,14 @@ def build_parser() -> argparse.ArgumentParser:
     replication_prompt.add_argument("--output", type=Path, required=True, help="输出 UTF-8 提示词文件")
     replication_prompt.add_argument("--audio-mode", choices=("silent", "ambient", "music", "voiceover", "full"), default="voiceover")
 
+    review_context = sub.add_parser("review-context", help="生成当前审核产物的哈希清单")
+    review_context.add_argument("--project", type=Path, default=Path("projects/demo"))
+    review_context.add_argument("--video", type=Path, help="输入视频路径；默认读取最近一次运行清单")
+
+    qa_finalize = sub.add_parser("qa-finalize", help="按当前产物哈希和人工审批执行最终门禁")
+    qa_finalize.add_argument("--project", type=Path, default=Path("projects/demo"))
+    qa_finalize.add_argument("--video", type=Path, help="输入视频路径；默认读取最近一次运行清单")
+
     newapi = sub.add_parser("newapi", help="使用 New API 生成视频（默认仅 dry-run）")
     newapi.add_argument("--prompt", help="生成提示词")
     newapi.add_argument("--prompt-file", type=Path, help="从 UTF-8 文件读取提示词")
@@ -138,12 +146,16 @@ def main() -> None:
     elif args.command == "replication-prompt":
         prompt = compile_files(args.framework, args.timeline, args.output, audio_mode=args.audio_mode)
         result = {"status": "compiled", "output": str(args.output), "characters": len(prompt), "audio_mode": args.audio_mode}
+    elif args.command == "review-context":
+        result = orchestrator.review_context(args.video)
+    elif args.command == "qa-finalize":
+        result = orchestrator.finalize_qa(args.video)
     else:
         if args.prompt and args.prompt_file:
             raise SystemExit("--prompt 与 --prompt-file 只能二选一")
         prompt = args.prompt
         if args.prompt_file:
-            prompt = args.prompt_file.read_text(encoding="utf-8")
+            prompt = args.prompt_file.read_text(encoding="utf-8-sig")
         if not prompt:
             raise SystemExit("newapi 需要 --prompt 或 --prompt-file")
         result = run_newapi(

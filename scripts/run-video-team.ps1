@@ -8,6 +8,7 @@ param(
   [ValidateSet("original_audio", "new_tts", "new_human_voice")][string]$VoiceMode = "new_tts",
   [ValidateSet("silent", "ambient", "music", "voiceover", "full")][string]$AudioMode = "voiceover",
   [string]$Runtime = "hypit.runtime.json",
+  [switch]$ResetScriptTimeline,
   [switch]$Submit,
   [switch]$ConfirmBilling
 )
@@ -65,10 +66,15 @@ try {
     Tee-Object -FilePath (Join-Path $logs "01b-deep-analysis.json")
   if ($LASTEXITCODE -ne 0) { throw "深度视频拆解失败" }
 
-  Write-Host "[文案导演] 生成可编辑文案和字幕时间轴"
-  & $pythonCommand @pythonPrefix -m video_replicator.cli script-timeline --project $Project --product-name $ProductName --voice-mode $VoiceMode |
-    Tee-Object -FilePath (Join-Path $logs "01c-script-timeline.json")
-  if ($LASTEXITCODE -ne 0) { throw "文案时间轴生成失败" }
+  $scriptTimeline = Join-Path $projectPath "analysis/script-timeline.json"
+  if (-not (Test-Path -LiteralPath $scriptTimeline) -or $ResetScriptTimeline) {
+    Write-Host "[文案导演] 生成可编辑文案和字幕时间轴"
+    & $pythonCommand @pythonPrefix -m video_replicator.cli script-timeline --project $Project --product-name $ProductName --voice-mode $VoiceMode |
+      Tee-Object -FilePath (Join-Path $logs "01c-script-timeline.json")
+    if ($LASTEXITCODE -ne 0) { throw "文案时间轴生成失败" }
+  } else {
+    Write-Host "[文案导演] 保留已有的人工编辑时间轴"
+  }
 
   $framework = Join-Path $projectPath "analysis/replication-framework.json"
   $compiledPrompt = Join-Path $projectPath "outputs/final_product_swap_prompt.md"
@@ -80,6 +86,14 @@ try {
   } else {
     Write-Warning "未找到 $framework；当前仅完成基础拆解，真实提交前必须补充并审核 replication-framework.json。"
   }
+
+  Write-Host "[质量验收官] 生成审核指纹并复核当前最终产物"
+  & $pythonCommand @pythonPrefix -m video_replicator.cli review-context --project $Project |
+    Tee-Object -FilePath (Join-Path $logs "01e-review-context.json")
+  if ($LASTEXITCODE -ne 0) { throw "审核指纹生成失败" }
+  & $pythonCommand @pythonPrefix -m video_replicator.cli qa-finalize --project $Project |
+    Tee-Object -FilePath (Join-Path $logs "01f-final-qa.json")
+  if ($LASTEXITCODE -ne 0) { throw "最终 QA 失败" }
 
   Write-Host "[交付打包师] 生成可供其他平台使用的素材包"
   & powershell -ExecutionPolicy Bypass -File scripts/export-manual-generation-package.ps1 -Project $Project -AudioMode $AudioMode |
@@ -130,10 +144,10 @@ try {
     }
   }
 
-  $teamReport = Get-Content -LiteralPath (Join-Path $projectPath "outputs/team-run-report.json") -Raw | ConvertFrom-Json
+  $finalQa = Get-Content -LiteralPath (Join-Path $projectPath "outputs/qa.json") -Raw | ConvertFrom-Json
   $summary = [ordered]@{
-    workflow_status = [string]$teamReport.status
-    status = if ($Submit) { "submitted" } else { [string]$teamReport.status }
+    workflow_status = [string]$finalQa.status
+    status = if ($Submit) { "submitted" } else { [string]$finalQa.status }
     project = (Resolve-Path $projectPath).Path
     manual_package = "$projectPath\outputs\manual-generation-package.zip"
     logs = $logs

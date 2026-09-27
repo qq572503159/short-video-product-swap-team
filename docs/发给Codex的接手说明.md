@@ -5,6 +5,8 @@
 ```text
 请解压并检查这个短视频产品替换工具包。先阅读 README.md、docs/OPERATIONS.md、docs/多智能体团队说明.md，以及 skills/short-video-product-swap-team/SKILL.md。
 
+每次面向我的回复末尾，请根据当前阶段给出恰好 3 条简短、相关、可直接发送的后续提问建议，使用纯文本列表；不要重复我已经确认的事项。建议只是快捷文本，不代表我已授权付费操作，也不要声称它们是 Codex 原生可点击按钮。
+
 请按以下顺序执行：
 1. 不读取、显示或写入任何真实 API key。
 2. 运行 scripts/init-workspace.ps1 完成依赖检查和 Provider 构建；如果默认 python 低于 3.10，优先使用 py -3.12。

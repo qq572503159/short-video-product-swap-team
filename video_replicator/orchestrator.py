@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import shutil
 import subprocess
+import uuid
 
 from .agents import AnalyzerAgent, KeyframeCurationAgent, PromptDirectorAgent, QAAgent, StoryPlannerAgent
 from .deep_analysis import run_deep_analysis
@@ -11,7 +12,13 @@ from .transcription import transcribe_video
 from .gemini_review import run_gemini_review
 from .script_timeline import run_script_timeline
 from .schemas import ReplicationPlan, Shot, VideoEvidence, read_json, write_json
-from .run_manifest import input_record, utc_now, write_run_manifest
+from .run_manifest import (
+    input_record,
+    missing_review_artifacts,
+    project_artifact_hashes,
+    utc_now,
+    write_run_manifest,
+)
 
 
 class Orchestrator:
@@ -21,15 +28,25 @@ class Orchestrator:
         self.project_dir = project_dir
         self.analysis_dir = project_dir / "analysis"
         self.output_dir = project_dir / "outputs"
+        self.run_id = f"{utc_now().replace(':', '').replace('-', '').replace('.', '')}-{uuid.uuid4().hex[:8]}"
+        self.run_manifest_path = self.output_dir / "run-manifest.json"
         self.analysis_dir.mkdir(parents=True, exist_ok=True)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def _save_run_manifest(self, manifest: dict) -> None:
+        run_id = str(manifest.get("run_id") or self.run_id)
+        manifest["run_id"] = run_id
+        write_run_manifest(self.run_manifest_path, manifest)
+        history_path = self.output_dir / "runs" / run_id / "run-manifest.json"
+        write_run_manifest(history_path, manifest)
 
     def analyze(self, video: Path) -> VideoEvidence:
         started_at = utc_now()
         evidence = AnalyzerAgent().run(video, self.analysis_dir)
         write_json(self.analysis_dir / "evidence.json", evidence)
-        write_run_manifest(self.output_dir / "run-manifest.json", {
+        self._save_run_manifest({
             "schema_version": "run-manifest@1",
+            "run_id": self.run_id,
             "status": "blocked" if not video.is_file() else "review_required",
             "started_at": started_at,
             "updated_at": utc_now(),
@@ -83,11 +100,57 @@ class Orchestrator:
         write_json(self.output_dir / "prompts.json", plan)
         return plan
 
-    def qa(self, plan: ReplicationPlan, scope_approval_path: Path | None = None) -> dict:
+    def review_context(self, input_video: Path | None = None) -> dict:
+        if input_video is None and self.run_manifest_path.is_file():
+            manifest = read_json(self.run_manifest_path)
+            recorded_video = manifest.get("input_video", {}).get("path")
+            input_video = Path(recorded_video) if recorded_video else None
+        context = {
+            "schema_version": "review-context@1",
+            "updated_at": utc_now(),
+            "artifact_hashes": project_artifact_hashes(self.project_dir, input_video),
+        }
+        write_json(self.output_dir / "review-context.json", context)
+        return context
+
+    def qa(
+        self,
+        plan: ReplicationPlan,
+        scope_approval_path: Path | None = None,
+        input_video: Path | None = None,
+    ) -> dict:
         scope_approval_path = scope_approval_path or self.output_dir / "scope-approval.json"
         approval = read_json(scope_approval_path) if scope_approval_path.is_file() else None
-        result = QAAgent().run(plan, approval)
+        hashes = self.review_context(input_video)["artifact_hashes"]
+        result = QAAgent().run(plan, approval, hashes)
         write_json(self.output_dir / "qa.json", result)
+        return result
+
+    def finalize_qa(self, input_video: Path | None = None) -> dict:
+        plan_path = self.analysis_dir / "plan.json"
+        if not plan_path.is_file():
+            raise FileNotFoundError(f"缺少分析计划，无法执行最终 QA: {plan_path}")
+        plan = load_plan(plan_path)
+        result = self.qa(plan, input_video=input_video)
+        missing = missing_review_artifacts(result.get("artifact_hashes", {}))
+        if missing:
+            result["status"] = "blocked"
+            result["blocking_flags"].append(
+                "缺少最终审核所需产物: " + ", ".join(missing)
+            )
+            write_json(self.output_dir / "qa.json", result)
+        manifest = read_json(self.run_manifest_path) if self.run_manifest_path.is_file() else {}
+        manifest.update({
+            "status": result["status"],
+            "updated_at": utc_now(),
+            "qa": result,
+            "artifacts": {
+                **manifest.get("artifacts", {}),
+                "qa": str((self.output_dir / "qa.json").resolve()),
+                "review_context": str((self.output_dir / "review-context.json").resolve()),
+            },
+        })
+        self._save_run_manifest(manifest)
         return result
 
     def keyframes(
@@ -122,6 +185,9 @@ class Orchestrator:
         plan = self.plan(evidence, segment_max_sec, aspect_ratio)
         plan = self.prompts(plan)
         qa = self.qa(plan)
+        manifest = read_json(self.run_manifest_path)
+        manifest.update({"status": qa["status"], "updated_at": utc_now(), "qa": qa})
+        self._save_run_manifest(manifest)
         return {"status": qa["status"], "project_dir": str(self.project_dir), "qa": qa}
 
     def team_run(self, video: Path, segment_max_sec: int, aspect_ratio: str, transcription_language: str | None = None, transcription_model: str = "small") -> dict:
@@ -154,8 +220,7 @@ class Orchestrator:
                 "next_gate": "补充有效输入视频后重试",
             }
             write_json(self.output_dir / "team-run-report.json", result)
-            manifest_path = self.output_dir / "run-manifest.json"
-            manifest = read_json(manifest_path) if manifest_path.exists() else {}
+            manifest = read_json(self.run_manifest_path) if self.run_manifest_path.exists() else {}
             manifest.update({
                 "status": "blocked",
                 "updated_at": utc_now(),
@@ -168,7 +233,7 @@ class Orchestrator:
                     "qa": str((self.output_dir / "qa.json").resolve()),
                 },
             })
-            write_run_manifest(manifest_path, manifest)
+            self._save_run_manifest(manifest)
             return result
         steps.append({
             "agent": AnalyzerAgent.display_name,
@@ -230,8 +295,7 @@ class Orchestrator:
             "next_gate": "人工确认产品替换边界、隐私和预计费用后才能提交外部生成",
         }
         write_json(self.output_dir / "team-run-report.json", result)
-        manifest_path = self.output_dir / "run-manifest.json"
-        manifest = read_json(manifest_path) if manifest_path.exists() else {}
+        manifest = read_json(self.run_manifest_path) if self.run_manifest_path.exists() else {}
         manifest.update({
             "status": qa["status"],
             "updated_at": utc_now(),
@@ -245,7 +309,7 @@ class Orchestrator:
                 "scope_approval": str((self.output_dir / "scope-approval.json").resolve()),
             },
         })
-        write_run_manifest(manifest_path, manifest)
+        self._save_run_manifest(manifest)
         return result
 
     def sync(self, video: Path, shots_path: Path | None = None, chrome: Path | None = None, timeout_sec: int = 120) -> dict:

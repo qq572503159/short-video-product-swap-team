@@ -659,7 +659,12 @@ class QAAgent:
 
     display_name = "质量验收官"
 
-    def run(self, plan: ReplicationPlan, scope_approval: dict[str, Any] | None = None) -> dict[str, Any]:
+    def run(
+        self,
+        plan: ReplicationPlan,
+        scope_approval: dict[str, Any] | None = None,
+        artifact_hashes: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         flags = list(plan.review_flags)
         blocking_flags: list[str] = []
         if plan.segment_max_sec not in (15, 30):
@@ -680,12 +685,19 @@ class QAAgent:
                 and str(scope_approval.get("status", "")).lower() == "approved"
                 and str(scope_approval.get("reviewer", "")).strip()
                 and str(scope_approval.get("approved_at", "")).strip()
+                and artifact_hashes
+                and scope_approval.get("artifact_hashes") == artifact_hashes
             )
             if not approval_ok:
-                review_flags.append("等待负责人完成 scope-approval.json 人工确认")
+                review_flags.append("等待负责人确认与当前产物哈希匹配的 scope-approval.json")
                 status = STATUS_REVIEW_REQUIRED
             elif review_flags:
                 status = STATUS_REVIEW_REQUIRED
             else:
                 status = STATUS_READY
-        return {"status": status, "flags": review_flags, "blocking_flags": blocking_flags}
+        return {
+            "status": status,
+            "flags": review_flags,
+            "blocking_flags": blocking_flags,
+            "artifact_hashes": artifact_hashes or {},
+        }

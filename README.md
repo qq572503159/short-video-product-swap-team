@@ -109,7 +109,7 @@ py -3.12 .\scripts\build_exact_voiceover.py `
   --timeline .\projects\my-campaign\analysis\script-timeline.json
 ```
 
-复核逐镜蓝图与新文案。若要改对白/字幕，编辑项目 `analysis/` 中对应 timeline/script 产物，并再次 QA。字幕不必沿用参考视频里的字幕，可明确要求清除或按新文案生成。若要真实生成，必须提供人工审核后的 `analysis/replication-framework.json`；入口会编译成 `outputs/final_product_swap_prompt.md`，缺失或 QA 未通过时会阻止提交。
+复核逐镜蓝图与新文案。若要改对白/字幕，编辑项目 `analysis/script-timeline.json`；工作流重跑时默认保留已有时间轴，只有显式传入 `-ResetScriptTimeline` 才重建。字幕不必沿用参考视频里的字幕，可明确要求清除或按新文案生成。真实生成需要人工审核 `analysis/replication-framework.json`、文案时间轴和最终编译提示词。
 
 ### 关键帧编辑建议
 
@@ -133,22 +133,37 @@ Gemini（可选）使用 `GEMINI_API_KEY` 环境变量。不要将密钥放进�
 
 ### 三态门禁与运行清单
 
-每次分析都会在 `projects/<项目>/outputs/run-manifest.json` 写入运行清单，包含输入视频绝对路径、文件大小、修改时间、SHA-256、参数、步骤、产物路径和 QA 状态。视频内容不上传到仓库。
+每次分析都会更新 `projects/<项目>/outputs/run-manifest.json`，并在 `outputs/runs/<run_id>/run-manifest.json` 保留该次运行的独立清单，包含输入视频绝对路径、文件大小、修改时间、SHA-256、参数、步骤、产物路径和 QA 状态。视频内容不上传到仓库。
 
 - `blocked`：存在缺失输入、占位镜头、分段超限或其他阻断项，必须修复后重跑。
 - `review_required`：确定性检查已完成，但仍需要负责人审核范围、文案、音频/字幕策略或其他风险；不得提交付费生成。
 - `ready`：审核文件有效且没有阻断项，可以在费用确认后进入 provider 提交。
 
-人工审核文件示例（保存为项目的 `outputs/scope-approval.json`）：
+人工审核按以下顺序进行，避免沿用旧审批：
+
+1. 完成本地拆解、编辑 `replication-framework.json` 和 `script-timeline.json`，生成最终提示词。
+2. 运行团队入口；它会写出 `outputs/review-context.json`，其中记录输入视频、产品图、逐镜框架、文案、提示词、关键帧拼图，以及存在时的 Hypit `.svrun`/`.svml` 哈希。
+3. 若走 Python New API，先用最终提示词和目标模型参数做一次 dry-run；dry-run 会生成安全的请求指纹。然后重新运行 `review-context`，将请求指纹也纳入审核清单。
+4. 检查这些实际文件与生成参数，把 `review-context.json` 的完整 `artifact_hashes` 原样放进 `outputs/scope-approval.json`，并填写审核人、时间和审核说明。
+5. 运行 `py -3.12 -m video_replicator.cli qa-finalize --project projects/my-campaign`。只有当前产物哈希仍与审批相同且 QA 无阻断项，状态才会是 `ready`。
+6. 提交时 provider 会重新计算哈希；任一输入、框架、文案、提示词、参考 URL、模型参数或 Hypit 文件变化，旧 QA/审批即失效。
+
+人工审核文件示例（`artifact_hashes` 必须完整复制 `review-context.json` 中的对象）：
 
 ```json
 {
   "status": "approved",
   "reviewer": "负责人姓名",
-  "approved_at": "2026-09-24T12:00:00+08:00",
-  "notes": "确认替换对象、保留人物与构图、音频和字幕策略"
+  "approved_at": "2026-09-27T12:00:00+08:00",
+  "notes": "已检查替换范围、最终文案、提示词和生成文件",
+  "artifact_hashes": {
+    "input_video": "<从 review-context.json 原样复制>",
+    "compiled_prompt": "<从 review-context.json 原样复制>"
+  }
 }
 ```
+
+示例中的哈希字段仅作格式说明；实际文件必须包含审核上下文列出的全部键值，不能只保留这两个示例键。
 
 生成时应一并提供：
 

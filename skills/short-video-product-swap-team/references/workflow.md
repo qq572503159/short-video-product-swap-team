@@ -28,7 +28,7 @@
 
 ## 5. 生成前验收
 
-检查三联图、产品图、时长、画幅、音频策略、公开 URL 和脱敏日志。`qa.status=blocked` 时必须先修复阻断项；`review_required` 时保留 flags，并要求负责人完成 `scope-approval.json`；只有 `qa.status=ready` 才能进入费用确认和提交，不能静默提交。
+检查三联图、产品图、时长、画幅、音频策略、公开 URL 和脱敏日志。`qa.status=blocked` 时必须先修复阻断项；`review_required` 时先对 New API 请求 dry-run（如适用），再查看 `review-context.json`，由负责人把完整 `artifact_hashes` 写入 `scope-approval.json`，最后运行 `qa-finalize`。只有 `qa.status=ready` 才能进入费用确认和提交。提交端重新计算哈希，文件、URL 或生成参数变化后必须重新审批，不能静默提交。
 
 ## 6. 生成与合成
 

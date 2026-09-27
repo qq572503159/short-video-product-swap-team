@@ -123,9 +123,9 @@
       "responsibility": "执行确定性检查，汇总风险，并阻止缺少审批、素材或连续性信息的生成任务。",
       "inputs": ["analysis/plan.json", "outputs/prompts.json", "reference_collages/manifest.json"],
       "outputs": ["outputs/qa.json", "review decision"],
-      "acceptance": ["qa.status 只能是 blocked、review_required 或 ready", "所有 flags 可定位到具体产物", "blocked 和 review_required 时不得提交付费生成"],
+      "acceptance": ["qa.status 只能是 blocked、review_required 或 ready", "QA 与人工审批绑定同一组产物哈希", "所有 flags 可定位到具体产物", "blocked 和 review_required 时不得提交付费生成"],
       "approval_gate": "generation_billing",
-      "handoff": {"to": ["provider_adapter"], "requires": ["qa.status=ready", "费用确认记录"]}
+      "handoff": {"to": ["provider_adapter"], "requires": ["qa.status=ready", "scope-approval artifact_hashes matches current inputs", "费用确认记录"]}
     },
     {
       "id": "provider_adapter",

@@ -18,6 +18,13 @@ description: 使用中文多智能体团队拆解并复刻短视频，保留人�
 
 确认卡后，针对素材主动给出 2–4 条建议和风险提示。用户确认替换范围及关键建议后，才开始拆解、改图、定价和生成。若用户已明确相关信息，整理回显确认即可，不重复追问。
 
+## 后续提问建议（强制）
+
+- 每次面向用户的回复末尾，提供恰好 3 条与当前项目状态相关、可直接发送的后续提问建议；多智能体之间的内部消息不需要附加。
+- 建议用简短的问句或操作请求呈现为纯文本列表，不声称它们是 Codex 原生按钮，也不承诺界面会显示为可点击选项。
+- 根据当前阶段动态选择建议：需求确认时聚焦替换范围与素材；拆解时聚焦镜头、对白和文案；生成前聚焦模型、参数、素材和费用核对；生成后聚焦验收、修改和交付。不要重复用户已确认或已完成的事项。
+- 建议应帮助用户推进下一步，不替用户做决定。任何关于付费生成的建议只能引导查看费用、核对参数或明确询问是否提交；不能把点击或选择建议视为付费授权。
+
 ## 工作原则
 
 - 原始参考视频默认只在本地分析。外部视频模型只接收审核后的提示词、三联关键帧和产品图。
@@ -31,7 +38,7 @@ description: 使用中文多智能体团队拆解并复刻短视频，保留人�
 - 真实生成前必须展示模型、时长、分辨率、参考素材数量和预计费用。没有明确费用确认时，只执行本地处理、dry-run、`check`、`plan` 和 `pricing`。
 - 每次都准备两种交付：直接生成成片，以及可供其他平台使用的 ZIP 素材包和中文教程。
 - 使用 `video-replicator replication-prompt` 从 `replication-framework.json` 和 `script-timeline.json` 编译 API 提示词；编译器会阻止未完成的镜头字段和无效时间轴。
-- 真实提交前必须存在审核后的 `analysis/replication-framework.json`、编译后的 `outputs/final_product_swap_prompt.md` 和 `outputs/qa.json`（状态为 `ready`）；`blocked` 表示存在阻断问题，`review_required` 表示需要负责人处理人工审核，只有 `ready` 才能进入付费提交；Hypit provider 当前不支持原生音频。
+- 真实提交前必须存在审核后的 `analysis/replication-framework.json`、编译后的 `outputs/final_product_swap_prompt.md` 和 `outputs/qa.json`（状态为 `ready`）。Python New API 必须先 dry-run，审核请求指纹及完整 `artifact_hashes`，再运行 `qa-finalize`；Hypit 文件也纳入指纹。输入、提示词、参考 URL 或生成参数变化时，旧审批自动失效。`blocked` 表示存在阻断问题，`review_required` 表示需要负责人处理人工审核，只有 `ready` 才能进入付费提交；Hypit provider 当前不支持原生音频。
 - 密钥只保存在 Credential Store 或本机环境文件中，不进入代码、运行时 JSON、日志、截图或 Git。
 
 ## 路由

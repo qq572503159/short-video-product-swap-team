@@ -8,6 +8,7 @@ task that must be polled through ``/v1/videos/{id}``.
 """
 
 import json
+import hashlib
 import os
 import time
 from datetime import datetime
@@ -17,6 +18,8 @@ from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
+
+from .run_manifest import current_project_artifact_hashes, missing_review_artifacts
 
 
 DEFAULT_ENV_FILE = Path.home() / ".codex" / "secrets" / "newapi.env"
@@ -215,6 +218,11 @@ def write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _request_fingerprint(payload: dict[str, Any]) -> str:
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def run_newapi(
     *,
     project_dir: Path,
@@ -232,10 +240,22 @@ def run_newapi(
     qa_file: Path | None = None,
     require_compiled_prompt: bool = True,
 ) -> dict[str, Any]:
+    if not dry_run and not require_compiled_prompt:
+        raise ValueError("真实提交不允许关闭已编译提示词门禁")
     client = NewAPIVideoClient()
     selected_model = model or client.config.model or "minimax-h3-f"
+    selected_prompt = prompt
+    if not dry_run:
+        compiled_path = project_dir / "outputs" / "final_product_swap_prompt.md"
+        if not compiled_path.is_file():
+            raise ValueError(f"真实提交前必须存在已编译提示词: {compiled_path}")
+        selected_prompt = compiled_path.read_text(encoding="utf-8-sig").strip()
+        if not selected_prompt:
+            raise ValueError(f"已编译提示词为空: {compiled_path}")
+        if prompt.strip() != selected_prompt:
+            raise ValueError("提交提示词与审核过的 final_product_swap_prompt.md 不一致，请重新 dry-run/审批")
     payload = client.build_payload(
-        prompt,
+        selected_prompt,
         model=selected_model,
         duration=duration,
         ratio=ratio,
@@ -246,9 +266,28 @@ def run_newapi(
     )
     output_dir = project_dir / "outputs" / "newapi"
     output_dir.mkdir(parents=True, exist_ok=True)
+    fingerprint_path = output_dir / "request-fingerprint.json"
+    fingerprint = _request_fingerprint(payload)
+    fingerprint_record = {
+        "schema_version": "newapi-request-fingerprint@1",
+        "sha256": fingerprint,
+        "model": selected_model,
+        "duration": duration,
+        "ratio": ratio,
+        "resolution": resolution,
+        "generate_audio": generate_audio,
+        "reference_image_count": len(payload.get("referenceImages", [])),
+        "reference_video_count": len(payload.get("referenceVideos", [])),
+    }
     if dry_run:
         write_json(output_dir / "request.redacted.json", _redact(payload))
+        write_json(fingerprint_path, fingerprint_record)
         return {"status": "dry_run", "model": selected_model, "request": str(output_dir / "request.redacted.json")}
+    if not fingerprint_path.is_file():
+        raise ValueError(f"真实提交前必须先完成 dry-run 并审核请求指纹: {fingerprint_path}")
+    reviewed_request = json.loads(fingerprint_path.read_text(encoding="utf-8-sig"))
+    if reviewed_request.get("sha256") != fingerprint:
+        raise ValueError("模型、参数、提示词或参考 URL 与 dry-run 审核请求不一致")
     if not confirm_billing:
         raise ValueError("真实提交会产生费用，请同时传入 --confirm-billing")
     qa_path = qa_file or project_dir / "outputs" / "qa.json"
@@ -257,6 +296,12 @@ def run_newapi(
     qa = json.loads(qa_path.read_text(encoding="utf-8-sig"))
     if qa.get("status") != "ready":
         raise ValueError(f"QA 未通过，禁止真实提交: status={qa.get('status')!r}")
+    current_hashes = current_project_artifact_hashes(project_dir)
+    missing = missing_review_artifacts(current_hashes)
+    if missing:
+        raise ValueError(f"缺少最终审核所需产物，禁止真实提交: {', '.join(missing)}")
+    if qa.get("artifact_hashes") != current_hashes:
+        raise ValueError("QA 对应的产物已变化或缺少哈希，请重新生成 review-context 并 QA")
     approval_path = project_dir / "outputs" / "scope-approval.json"
     if not approval_path.is_file():
         raise ValueError(f"真实提交前必须存在人工审核文件: {approval_path}")
@@ -265,12 +310,9 @@ def run_newapi(
         str(approval.get("status", "")).lower() != "approved"
         or not str(approval.get("reviewer", "")).strip()
         or not str(approval.get("approved_at", "")).strip()
+        or approval.get("artifact_hashes") != current_hashes
     ):
-        raise ValueError(f"人工审核文件无效，禁止真实提交: {approval_path}")
-    if require_compiled_prompt:
-        compiled = project_dir / "outputs" / "final_product_swap_prompt.md"
-        if not compiled.is_file() or not compiled.read_text(encoding="utf-8-sig").strip():
-            raise ValueError(f"真实提交前必须存在已编译提示词: {compiled}")
+        raise ValueError(f"人工审核文件无效或已过期，禁止真实提交: {approval_path}")
     run_id = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     output_dir = output_dir / f"run-{run_id}"
     output_dir.mkdir(parents=True, exist_ok=False)
